@@ -306,4 +306,7 @@ sin instalaciones no hay negocio. Lo que de verdad mueve la aguja:
 
 ## Licencia
 
-MIT
+MIT — ver [LICENSE](LICENSE).
+
+Las tipografías van aparte: Bricolage Grotesque e IBM Plex Sans Condensed se distribuyen bajo la
+**SIL Open Font License**, con su copia en [`assets/licencias`](app/src/main/assets/licencias).
