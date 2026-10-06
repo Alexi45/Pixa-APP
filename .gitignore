@@ -1,0 +1,17 @@
+# Compilación
+*.iml
+.gradle/
+build/
+local.properties
+.cxx/
+
+# Firma — NUNCA subir estos archivos a un repositorio
+*.jks
+*.keystore
+keystore.properties
+
+# Entornos
+.idea/
+.DS_Store
+captures/
+.kotlin/

@@ -1,0 +1,276 @@
+package com.riscart.pixa.ui
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.riscart.pixa.engine.Cell
+import com.riscart.pixa.engine.Puzzle
+import kotlin.math.floor
+
+/**
+ * El tablero completo: pistas arriba y a la izquierda, y la rejilla.
+ *
+ * Se dibuja en un único Canvas en vez de con cientos de composables. Con una
+ * rejilla de 15x15 son 225 casillas; pintarlas de una pasada va mucho más fino
+ * al arrastrar el dedo, que es justo cuando se nota.
+ */
+@Composable
+fun Tablero(
+    puzzle: Puzzle,
+    rejilla: List<Cell>,
+    colores: ColoresTablero,
+    onCelda: (x: Int, y: Int, arrastrando: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val medidor = rememberTextMeasurer()
+    val densidad = LocalDensity.current
+
+    val maxPistasFila = remember(puzzle) { puzzle.rowClues.maxOf { it.size } }
+    val maxPistasCol = remember(puzzle) { puzzle.colClues.maxOf { it.size } }
+
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val anchoDisponible = with(densidad) { maxWidth.toPx() }
+        val altoDisponible = with(densidad) { maxHeight.toPx() }
+
+        // Las casillas de pista son algo más estrechas que las del tablero.
+        val factorPista = 0.68f
+        val unidadesAncho = puzzle.width + maxPistasFila * factorPista
+        val unidadesAlto = puzzle.height + maxPistasCol * factorPista
+
+        val lado = minOf(anchoDisponible / unidadesAncho, altoDisponible / unidadesAlto)
+        val ladoPista = lado * factorPista
+        val origenX = maxPistasFila * ladoPista
+        val origenY = maxPistasCol * ladoPista
+
+        val altoTotalDp = with(densidad) { (origenY + puzzle.height * lado).toDp() }
+
+        val estiloPista = TextStyle(
+            fontSize = with(densidad) { (lado * 0.42f).toSp() },
+            fontWeight = FontWeight.Medium,
+            color = colores.textoPista,
+        )
+        val estiloPistaFuerte = estiloPista.copy(color = colores.celdaPintada)
+
+        fun celdaEn(posicion: Offset): Pair<Int, Int>? {
+            val x = floor((posicion.x - origenX) / lado).toInt()
+            val y = floor((posicion.y - origenY) / lado).toInt()
+            return if (x in 0 until puzzle.width && y in 0 until puzzle.height) x to y else null
+        }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(altoTotalDp)
+                .pointerInput(puzzle) {
+                    detectTapGestures { posicion ->
+                        celdaEn(posicion)?.let { (x, y) -> onCelda(x, y, false) }
+                    }
+                }
+                .pointerInput(puzzle) {
+                    var ultima: Pair<Int, Int>? = null
+                    detectDragGestures(
+                        onDragStart = { posicion ->
+                            ultima = celdaEn(posicion)
+                            ultima?.let { (x, y) -> onCelda(x, y, true) }
+                        },
+                        onDragEnd = { ultima = null },
+                        onDragCancel = { ultima = null },
+                    ) { cambio, _ ->
+                        val celda = celdaEn(cambio.position)
+                        if (celda != null && celda != ultima) {
+                            ultima = celda
+                            onCelda(celda.first, celda.second, true)
+                        }
+                    }
+                },
+        ) {
+            dibujarFondoPistas(colores, origenX, origenY, lado, puzzle)
+            dibujarPistas(
+                puzzle, rejilla, medidor, estiloPista, estiloPistaFuerte,
+                origenX, origenY, lado, ladoPista, maxPistasFila, maxPistasCol,
+            )
+            dibujarCeldas(puzzle, rejilla, colores, origenX, origenY, lado)
+            dibujarLineas(puzzle, colores, origenX, origenY, lado)
+        }
+    }
+}
+
+/** Sombrea muy ligeramente las bandas de pistas para separarlas del tablero. */
+private fun DrawScope.dibujarFondoPistas(
+    colores: ColoresTablero,
+    origenX: Float,
+    origenY: Float,
+    lado: Float,
+    puzzle: Puzzle,
+) {
+    drawRect(
+        color = colores.resaltado,
+        topLeft = Offset(origenX, 0f),
+        size = Size(puzzle.width * lado, origenY),
+    )
+    drawRect(
+        color = colores.resaltado,
+        topLeft = Offset(0f, origenY),
+        size = Size(origenX, puzzle.height * lado),
+    )
+}
+
+private fun DrawScope.dibujarPistas(
+    puzzle: Puzzle,
+    rejilla: List<Cell>,
+    medidor: TextMeasurer,
+    estilo: TextStyle,
+    estiloFuerte: TextStyle,
+    origenX: Float,
+    origenY: Float,
+    lado: Float,
+    ladoPista: Float,
+    maxPistasFila: Int,
+    maxPistasCol: Int,
+) {
+    // Pistas de las filas, pegadas al tablero por la derecha.
+    for (y in 0 until puzzle.height) {
+        val pistas = puzzle.rowClues[y].filter { it > 0 }
+        val filaHecha = lineaCompleta(puzzle, rejilla, fila = y)
+        pistas.forEachIndexed { indice, numero ->
+            val hueco = maxPistasFila - pistas.size + indice
+            val texto = medidor.measure(numero.toString(), if (filaHecha) estiloFuerte else estilo)
+            drawText(
+                textLayoutResult = texto,
+                topLeft = Offset(
+                    hueco * ladoPista + (ladoPista - texto.size.width) / 2f,
+                    origenY + y * lado + (lado - texto.size.height) / 2f,
+                ),
+            )
+        }
+    }
+
+    // Pistas de las columnas, pegadas al tablero por abajo.
+    for (x in 0 until puzzle.width) {
+        val pistas = puzzle.colClues[x].filter { it > 0 }
+        val columnaHecha = lineaCompleta(puzzle, rejilla, columna = x)
+        pistas.forEachIndexed { indice, numero ->
+            val hueco = maxPistasCol - pistas.size + indice
+            val texto = medidor.measure(numero.toString(), if (columnaHecha) estiloFuerte else estilo)
+            drawText(
+                textLayoutResult = texto,
+                topLeft = Offset(
+                    origenX + x * lado + (lado - texto.size.width) / 2f,
+                    hueco * ladoPista + (ladoPista - texto.size.height) / 2f,
+                ),
+            )
+        }
+    }
+}
+
+/** ¿Está ya resuelta esta fila o columna? Sirve para atenuar sus pistas. */
+private fun lineaCompleta(
+    puzzle: Puzzle,
+    rejilla: List<Cell>,
+    fila: Int = -1,
+    columna: Int = -1,
+): Boolean = when {
+    fila >= 0 -> (0 until puzzle.width).all { x ->
+        val i = fila * puzzle.width + x
+        !puzzle.solution[i] || rejilla[i] == Cell.FILLED
+    }
+    columna >= 0 -> (0 until puzzle.height).all { y ->
+        val i = y * puzzle.width + columna
+        !puzzle.solution[i] || rejilla[i] == Cell.FILLED
+    }
+    else -> false
+}
+
+private fun DrawScope.dibujarCeldas(
+    puzzle: Puzzle,
+    rejilla: List<Cell>,
+    colores: ColoresTablero,
+    origenX: Float,
+    origenY: Float,
+    lado: Float,
+) {
+    val margen = lado * 0.06f
+    for (y in 0 until puzzle.height) {
+        for (x in 0 until puzzle.width) {
+            val i = y * puzzle.width + x
+            val izquierda = origenX + x * lado
+            val arriba = origenY + y * lado
+
+            when (rejilla[i]) {
+                Cell.FILLED -> drawRect(
+                    color = colores.celdaPintada,
+                    topLeft = Offset(izquierda + margen, arriba + margen),
+                    size = Size(lado - margen * 2, lado - margen * 2),
+                )
+                Cell.CROSSED -> {
+                    val p = lado * 0.3f
+                    val grosor = lado * 0.08f
+                    drawLine(
+                        color = colores.celdaTachada,
+                        start = Offset(izquierda + p, arriba + p),
+                        end = Offset(izquierda + lado - p, arriba + lado - p),
+                        strokeWidth = grosor,
+                    )
+                    drawLine(
+                        color = colores.celdaTachada,
+                        start = Offset(izquierda + lado - p, arriba + p),
+                        end = Offset(izquierda + p, arriba + lado - p),
+                        strokeWidth = grosor,
+                    )
+                }
+                Cell.UNKNOWN -> Unit
+            }
+        }
+    }
+}
+
+/** Rejilla con línea gruesa cada 5 casillas, que es lo que ayuda a contar. */
+private fun DrawScope.dibujarLineas(
+    puzzle: Puzzle,
+    colores: ColoresTablero,
+    origenX: Float,
+    origenY: Float,
+    lado: Float,
+) {
+    val fina = 1.dp.toPx()
+    val gruesa = 2.dp.toPx()
+    val anchoTablero = puzzle.width * lado
+    val altoTablero = puzzle.height * lado
+
+    for (x in 0..puzzle.width) {
+        val destacada = x % 5 == 0 || x == puzzle.width
+        drawLine(
+            color = if (destacada) colores.lineaGruesa else colores.lineaFina,
+            start = Offset(origenX + x * lado, origenY),
+            end = Offset(origenX + x * lado, origenY + altoTablero),
+            strokeWidth = if (destacada) gruesa else fina,
+        )
+    }
+    for (y in 0..puzzle.height) {
+        val destacada = y % 5 == 0 || y == puzzle.height
+        drawLine(
+            color = if (destacada) colores.lineaGruesa else colores.lineaFina,
+            start = Offset(origenX, origenY + y * lado),
+            end = Offset(origenX + anchoTablero, origenY + y * lado),
+            strokeWidth = if (destacada) gruesa else fina,
+        )
+    }
+}
