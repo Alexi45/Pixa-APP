@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Silueta en damero para el icono monocromo del tema del sistema. -->
+    <path android:fillColor="#FFFFFF" android:pathData="M25,21 h23 a4,4 0 0 1 4,4 v23 a4,4 0 0 1 -4,4 h-23 a4,4 0 0 1 -4,-4 v-23 a4,4 0 0 1 4,-4 z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M60,56 h23 a4,4 0 0 1 4,4 v23 a4,4 0 0 1 -4,4 h-23 a4,4 0 0 1 -4,-4 v-23 a4,4 0 0 1 4,-4 z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54.0,43.0 L65.0,54.0 L54.0,65.0 L43.0,54.0 z" />
+</vector>

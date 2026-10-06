@@ -1,5 +1,6 @@
 <resources>
     <style name="Theme.Pixa" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/fondo_app</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>

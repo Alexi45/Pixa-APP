@@ -69,7 +69,57 @@ y 15 que el solucionador lógico resuelve enteros, y determinismo por semilla.
 
 ---
 
-## Decisiones de diseño
+## El diseño: azulejo
+
+El tablero no es una rejilla, es un **panel de azulejos**, y jugar es ir colocando piezas
+vidriadas sobre la junta. De ahí sale todo lo demás y por eso la app no se parece a las otras
+del género, que son casi todas Material plano o dibujos de colorines.
+
+**La pieza** ([`Azulejo.kt`](app/src/main/java/com/riscart/pixa/ui/Azulejo.kt)) es la unidad de
+todo: el tablero, las tarjetas, los botones y hasta el icono están hechos de ella. Lleva tres
+capas baratas de pintar — el esmalte degradado, la luz entrando por arriba a la izquierda y el
+borde de abajo a la derecha hundiéndose en la junta — y un parámetro de `relieve`, porque las
+piezas claras necesitan mucho menos que las de color: con el mismo parecían nubes hinchadas.
+
+| | |
+|---|---|
+| Cobalto `#1B4F8F` | la pieza puesta |
+| Blanco roto `#F8F3E9` | la pieza por poner |
+| Junta `#C9BFAE` | el panel bajo las piezas |
+| Albero `#D9A441` | la olambrilla y las pistas ya resueltas |
+
+Detalles que hacen el estilo:
+
+- **La junta cada cinco casillas es más oscura**, como la llaga que separa los paños en un panel
+  de verdad. Es lo que deja contar de un vistazo, que en un nonograma es media partida.
+- **Una cenefa de olambrillas** remata la cabecera, con sus listeles arriba y abajo.
+- **El icono** es un panelito de cuatro piezas con el rombo dorado en el encuentro.
+- **En modo oscuro la junta va más clara que la pieza vacía**, al revés que en claro: si no, el
+  panel se convierte en una mancha negra y no se ve dónde está cada casilla.
+- **Nada de reflejo en las piezas del tablero.** A tamaño de casilla el brillo se leía como una
+  rayada en el esmalte, así que se queda solo para las piezas grandes.
+
+### Tipografía
+
+Las dos van **empaquetadas** en la app (licencia OFL, copia en
+[`assets/licencias`](app/src/main/assets/licencias)), así que se ve igual en cualquier móvil y
+sin pedirle nada a la red:
+
+- **Bricolage Grotesque** para los titulares, con su eje de tamaño óptico: una grotesca con
+  rarezas, no la Roboto del sistema.
+- **IBM Plex Sans Condensed** para el resto. Las cifras estrechas se leen bien apiladas en las
+  pistas, que es donde más número por centímetro hay.
+
+### Rendimiento
+
+Un 15 × 15 son 225 piezas y cada una lleva tres degradados. Dibujarlas de verdad en cada
+fotograma mientras arrastras el dedo sería tirar el rendimiento por la ventana, así que se
+**cuecen una vez** en un `ImageBitmap` por tamaño y color (`cocerPieza`) y el tablero solo
+estampa imágenes.
+
+---
+
+## Decisiones de juego
 
 - **Pintar está validado; tachar es libre.** Si pintas donde no toca, cuenta error y la casilla
   se tacha sola. Así el tablero nunca se queda en un estado sin solución y no hay que llevar la
@@ -82,7 +132,6 @@ y 15 que el solucionador lógico resuelve enteros, y determinismo por semilla.
   te arruina el récord.
 - **Al ganar, el cartel no tapa el dibujo.** Ocupa el sitio de los controles, porque el dibujo
   terminado es el premio.
-- **Modo oscuro diseñado aparte**, no invertido.
 - **SharedPreferences** para el progreso. Son cuatro enteros; Room o DataStore aquí sobran.
 
 ---
