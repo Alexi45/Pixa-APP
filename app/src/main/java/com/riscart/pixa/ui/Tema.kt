@@ -87,6 +87,7 @@ data class ColoresTablero(
     val bandaPistas: Color,
     val textoPista: Color,
     val textoPistaHecha: Color,
+    val fallo: Color,
 )
 
 val coloresTableroClaro = ColoresTablero(
@@ -98,6 +99,7 @@ val coloresTableroClaro = ColoresTablero(
     bandaPistas = Color(0x0A6B5F48),
     textoPista = Color(0xFF4A4639),
     textoPistaHecha = Color(0xFFB07C1C),
+    fallo = Color(0x59B4452E),
 )
 
 val coloresTableroOscuro = ColoresTablero(
@@ -111,6 +113,7 @@ val coloresTableroOscuro = ColoresTablero(
     bandaPistas = Color(0x0AFFFFFF),
     textoPista = Color(0xFF9AA3AC),
     textoPistaHecha = Color(0xFFE8BC63),
+    fallo = Color(0x59E8826B),
 )
 
 /* ── Tipografía ──────────────────────────────────────────────────────────────

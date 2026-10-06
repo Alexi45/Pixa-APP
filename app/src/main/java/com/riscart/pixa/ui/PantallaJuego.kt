@@ -1,5 +1,6 @@
 package com.riscart.pixa.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -9,35 +10,46 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.riscart.pixa.anuncios.GestorAnuncios.Companion.PISTAS_POR_ANUNCIO
 import com.riscart.pixa.engine.Puzzle
+import com.riscart.pixa.juego.Efecto
 import com.riscart.pixa.juego.EstadoJuego
 import com.riscart.pixa.juego.Modo
 import com.riscart.pixa.juego.formatearTiempo
@@ -49,14 +61,24 @@ fun PantallaJuego(
     titulo: String,
     pistasDisponibles: Int,
     onPedirPista: () -> Boolean,
-    onVictoria: (segundos: Int) -> Unit,
+    onVictoria: (segundos: Int, errores: Int) -> Boolean,
     onSalir: () -> Unit,
+    modifier: Modifier = Modifier,
+    celdasIniciales: String? = null,
+    segundosIniciales: Int = 0,
+    erroresIniciales: Int = 0,
     onContinuar: () -> Unit = onSalir,
     onVerAnuncio: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
+    onGuardar: (celdas: String, segundos: Int, errores: Int) -> Unit = { _, _, _ -> },
+    onOlvidar: () -> Unit = {},
 ) {
-    val estado = remember(puzzle) { EstadoJuego(puzzle) }
+    val estado = remember(puzzle) {
+        EstadoJuego(puzzle, celdasIniciales, segundosIniciales, erroresIniciales)
+    }
     val colores = coloresTablero()
+    val haptica = recordarHaptica()
+    val contexto = LocalContext.current
+    var fueRecord by remember(puzzle) { mutableStateOf(false) }
 
     // Cronómetro: se para al completar el puzzle y también mientras la app no
     // está en primer plano. Si no, ver un anuncio o atender una llamada te
@@ -71,99 +93,81 @@ fun PantallaJuego(
         }
     }
 
+    // El rebote de las piezas recién puestas solo mueve fotogramas mientras hay
+    // algo que animar; el resto del tiempo el tablero no se repinta.
+    LaunchedEffect(estado.animando) {
+        while (estado.animando) {
+            withFrameMillis { estado.avanzarAnimacion(System.currentTimeMillis()) }
+        }
+    }
+
     LaunchedEffect(estado.completado) {
-        if (estado.completado) onVictoria(estado.segundos)
+        if (estado.completado) {
+            fueRecord = onVictoria(estado.segundos, estado.errores)
+            onOlvidar()
+        }
     }
 
     // El destello rojo del error se apaga solo.
     LaunchedEffect(estado.ultimoError) {
         if (estado.ultimoError != null) {
-            delay(500)
+            delay(420)
             estado.limpiarUltimoError()
+        }
+    }
+
+    // Guardar la partida al salir o al irse la app a segundo plano.
+    //
+    // Se apunta ANTES de navegar, no al destruirse la pantalla: si se deja para
+    // el onDispose, la pantalla de inicio ya se ha compuesto y enseña el estado
+    // viejo — la tarjeta de «seguir» no aparecía hasta la siguiente vuelta.
+    val guardar by rememberUpdatedState(onGuardar)
+    val olvidar by rememberUpdatedState(onOlvidar)
+    val apuntar: () -> Unit = {
+        if (estado.valeLaPenaGuardar) {
+            guardar(estado.serializar(), estado.segundos, estado.errores)
+        } else if (estado.completado) {
+            olvidar()
+        }
+    }
+    val salir: () -> Unit = { apuntar(); onSalir() }
+
+    BackHandler { salir() }
+
+    val propietario = LocalLifecycleOwner.current
+    DisposableEffect(propietario, estado) {
+        val observador = LifecycleEventObserver { _, evento ->
+            if (evento == Lifecycle.Event.ON_PAUSE) apuntar()
+        }
+        propietario.lifecycle.addObserver(observador)
+        onDispose {
+            propietario.lifecycle.removeObserver(observador)
+            apuntar()
         }
     }
 
     val progreso by animateFloatAsState(estado.progreso, label = "progreso")
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp),
-    ) {
-        Spacer(Modifier.height(8.dp))
+    val tablero = @Composable { ancho: Modifier ->
+        Tablero(
+            puzzle = puzzle,
+            rejilla = estado.rejilla,
+            colores = colores,
+            onCelda = { x, y, arrastrando -> haptica(estado.tocar(x, y, arrastrando)) },
+            modifier = ancho,
+            asentamiento = estado::asentamiento,
+            fallo = estado.ultimoError,
+        )
+    }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "‹  Atrás",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(onClick = onSalir)
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            Text(titulo, style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = formatearTiempo(estado.segundos),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 10.dp),
-            )
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        BarraDeProgreso(progreso, colores)
-
-        Spacer(Modifier.height(6.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                "${estado.pintadasCorrectas} / ${puzzle.totalFilled}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (estado.errores > 0) {
-                Text(
-                    "${estado.errores} ${if (estado.errores == 1) "error" else "errores"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentAlignment = Alignment.Center,
-        ) {
-            Tablero(
-                puzzle = puzzle,
-                rejilla = estado.rejilla,
-                colores = colores,
-                onCelda = { x, y, arrastrando -> estado.tocar(x, y, arrastrando) },
-            )
-        }
-
-        // Al ganar, el cartel ocupa el sitio de los controles en vez de taparlo
-        // todo: el panel terminado es el premio, y hay que poder verlo.
+    val controles = @Composable {
         if (estado.completado) {
-            OverlayVictoria(
-                visible = true,
+            CarteldeVictoria(
+                puzzle = puzzle,
                 segundos = estado.segundos,
                 errores = estado.errores,
+                record = fueRecord,
+                onCompartir = { Compartir.panel(contexto, puzzle, estado.segundos, estado.errores) },
                 onSalir = onContinuar,
             )
         } else {
@@ -174,12 +178,145 @@ fun PantallaJuego(
                 colores = colores,
                 onModo = estado::cambiarModo,
                 onDeshacer = estado::deshacer,
-                onPista = { if (onPedirPista()) estado.usarPista() },
+                onPista = {
+                    if (onPedirPista() && estado.usarPista()) haptica(Efecto.PIEZA)
+                },
                 onVerAnuncio = onVerAnuncio,
             )
         }
+    }
 
-        Spacer(Modifier.height(20.dp))
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        // En apaisado el tablero se va a un lado y los controles al otro: en una
+        // columna no cabrían los dos y el panel se quedaría en un sello.
+        val apaisado = maxWidth > maxHeight
+        // En una tablet el tablero no debe estirarse sin fin: a partir de cierto
+        // tamaño las casillas dejan de ser cómodas y pasan a ser ridículas.
+        val tableroMaximo = Modifier.sizeIn(maxWidth = 560.dp, maxHeight = 620.dp)
+        val anchoPanel = (maxWidth * 0.32f).coerceIn(260.dp, 400.dp)
+
+        if (apaisado) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxHeight()
+                    // En una tablet apaisada, sin tope el tablero y el panel se
+                    // quedan cada uno en una punta de la pantalla.
+                    .widthIn(max = 980.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    tablero(tableroMaximo)
+                }
+                Spacer(Modifier.width(18.dp))
+                Column(
+                    modifier = Modifier
+                        .width(anchoPanel)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Cabecera(titulo, estado.segundos, salir, compacta = true)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        titulo,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    BarraDeProgreso(progreso, colores)
+                    Spacer(Modifier.height(6.dp))
+                    Marcador(estado.pintadasCorrectas, puzzle.totalFilled, estado.errores)
+                    Spacer(Modifier.height(16.dp))
+                    controles()
+                }
+            }
+        } else {
+            val margen = if (maxWidth < 380.dp) 8.dp else 16.dp
+            Column(Modifier.fillMaxSize().padding(horizontal = margen)) {
+                Spacer(Modifier.height(8.dp))
+                Cabecera(titulo, estado.segundos, salir, compacta = false)
+                Spacer(Modifier.height(10.dp))
+                BarraDeProgreso(progreso, colores)
+                Spacer(Modifier.height(6.dp))
+                Marcador(estado.pintadasCorrectas, puzzle.totalFilled, estado.errores)
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    tablero(tableroMaximo)
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.widthIn(max = 560.dp)) { controles() }
+                }
+                Spacer(Modifier.height(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Cabecera(titulo: String, segundos: Int, onSalir: () -> Unit, compacta: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "‹  Atrás",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onSalir)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        if (!compacta) {
+            Text(titulo, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+            Spacer(Modifier.weight(1f))
+        }
+        Text(
+            text = formatearTiempo(segundos),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 10.dp),
+        )
+    }
+}
+
+@Composable
+private fun Marcador(puestas: Int, total: Int, errores: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            "$puestas / $total",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (errores > 0) {
+            Text(
+                "$errores ${if (errores == 1) "error" else "errores"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 
@@ -201,25 +338,6 @@ private fun BarraDeProgreso(progreso: Float, colores: ColoresTablero) {
                 cornerRadius = radio,
             )
         }
-    }
-}
-
-/**
- * Envuelto en su propia función a propósito: dentro de un Column, la llamada a
- * AnimatedVisibility se resolvería a la variante de ColumnScope, que no vale aquí.
- */
-@Composable
-private fun OverlayVictoria(
-    visible: Boolean,
-    segundos: Int,
-    errores: Int,
-    onSalir: () -> Unit,
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn() + scaleIn(initialScale = 0.94f),
-    ) {
-        CarteldeVictoria(segundos = segundos, errores = errores, onSalir = onSalir)
     }
 }
 
@@ -324,7 +442,7 @@ private fun BarraDeControles(
 
 /** Un botón que es, literalmente, una pieza vidriada. */
 @Composable
-private fun PiezaBoton(
+fun PiezaBoton(
     texto: String,
     color: Color,
     colorTexto: Color,
@@ -347,39 +465,70 @@ private fun PiezaBoton(
             color = colorTexto,
             textAlign = TextAlign.Center,
             maxLines = 1,
+            modifier = Modifier.padding(horizontal = 6.dp),
         )
     }
 }
 
 @Composable
-private fun CarteldeVictoria(segundos: Int, errores: Int, onSalir: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .fondoDePieza(
-                color = MaterialTheme.colorScheme.surface,
-                radio = 20.dp,
-                relieve = 0.3f,
+private fun CarteldeVictoria(
+    puzzle: Puzzle,
+    segundos: Int,
+    errores: Int,
+    record: Boolean,
+    onCompartir: () -> Unit,
+    onSalir: () -> Unit,
+) {
+    AnimatedVisibility(visible = true, enter = fadeIn() + scaleIn(initialScale = 0.94f)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .fondoDePieza(
+                    color = MaterialTheme.colorScheme.surface,
+                    radio = 20.dp,
+                    relieve = 0.3f,
+                )
+                .padding(horizontal = 24.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // Si el panel era un dibujo, el nombre es el premio de verdad.
+            Text(
+                text = puzzle.nombre ?: "¡Panel terminado!",
+                style = MaterialTheme.typography.headlineMedium,
+                textAlign = TextAlign.Center,
             )
-            .padding(horizontal = 28.dp, vertical = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("¡Panel terminado!", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = formatearTiempo(segundos) +
-                if (errores == 0) " · sin fallos" else " · $errores fallos",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(16.dp))
-        PiezaBoton(
-            texto = "Continuar",
-            color = MaterialTheme.colorScheme.primary,
-            colorTexto = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier.width(190.dp),
-            onClick = onSalir,
-        )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = buildString {
+                    append(formatearTiempo(segundos))
+                    append(if (errores == 0) " · sin fallos" else " · $errores fallos")
+                    if (record) append(" · récord")
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (record) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PiezaBoton(
+                    texto = "Compartir",
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    colorTexto = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                    onClick = onCompartir,
+                )
+                PiezaBoton(
+                    texto = "Continuar",
+                    color = MaterialTheme.colorScheme.primary,
+                    colorTexto = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.weight(1f),
+                    onClick = onSalir,
+                )
+            }
+        }
     }
 }

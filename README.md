@@ -56,9 +56,23 @@ Es la diferencia entre un nonograma bien hecho y uno que da rabia.
 Además filtra los puzzles "feos": ni demasiado vacíos ni demasiado llenos, y sin filas enteras en
 blanco de más.
 
+### 32 dibujos hechos a mano
+
+Un nonograma generado al azar es un puzzle correcto, pero al terminarlo te quedas mirando una
+mancha de píxeles. La gracia del género es que **el panel terminado sea algo**: terminas y resulta
+que era un gato.
+
+[`Catalogo.kt`](app/src/main/java/com/riscart/pixa/engine/Catalogo.kt) tiene 32 dibujos dibujados
+a mano (10 de 5 × 5, 16 de 10 × 10 y 6 de 15 × 15), y **todos pasan por el mismo filtro que los
+generados**: un test comprueba que el solucionador lógico los termina enteros. Si un dibujo
+obligara a adivinar, el test lo caza antes de que llegue a nadie.
+
+Cada dificultad sirve primero un dibujo que aún no hayas descubierto; cuando se acaban, vuelve a
+los generados, que son infinitos. El nombre solo se ve **al terminar**.
+
 ### Tests
 
-23 tests en [`EngineTest.kt`](app/src/test/java/com/riscart/pixa/engine/EngineTest.kt) con una
+27 tests en [`EngineTest.kt`](app/src/test/java/com/riscart/pixa/engine/EngineTest.kt) con una
 notación compacta (`"#?."` = pintada / sin decidir / tachada): deducciones concretas, pistas
 imposibles, la garantía de que el solucionador **nunca** se contradice, puzzles generados a 5, 10
 y 15 que el solucionador lógico resuelve enteros, y determinismo por semilla.
@@ -66,6 +80,8 @@ y 15 que el solucionador lógico resuelve enteros, y determinismo por semilla.
 ```bash
 ./gradlew test
 ```
+
+Cubren el motor, el catálogo de dibujos y la generación.
 
 ---
 
@@ -119,6 +135,50 @@ estampa imágenes.
 
 ---
 
+## Lo que hace que vuelvas
+
+Sin trucos sucios: aquí no hay vidas que se agotan, ni temporizadores que te meten prisa, ni
+notificaciones pesadas. Lo que engancha es que **jugar sea agradable** y que haya algo al final.
+
+- **Los dibujos se coleccionan.** La pantalla de inicio lleva la cuenta («7 de 32 dibujos») y cada
+  dificultad enseña cuántos le quedan.
+- **El tacto.** Colocar una pieza, cerrar una línea y meter la pata se notan **distinto** en la
+  mano ([`Haptica.kt`](app/src/main/java/com/riscart/pixa/ui/Haptica.kt)). Es háptica del sistema,
+  así que respeta los ajustes del móvil.
+- **Las piezas se asientan.** Entran pequeñas, se pasan un pelín y se colocan. Medio segundo de
+  trabajo que separa «marcar casillas» de «colocar azulejos».
+- **La partida a medias se guarda.** Llevas medio 15 × 15, te llaman por teléfono, y al volver
+  está donde lo dejaste. Era el peor momento posible y ya no existe.
+- **Las pistas enseñan.** No revelan una casilla al azar: pasan el solucionador por el tablero tal
+  y como está y descubren una que **se podía deducir ahora mismo** — justo la jugada que tenías
+  delante. Y toman como cierto solo lo que está pintado, nunca tus cruces, que pueden estar mal.
+- **Se puede compartir el panel terminado** como imagen limpia, con su nombre y tu tiempo. Es la
+  mejor publicidad posible de un juego así y no cuesta un céntimo.
+- **Las reglas se explican la primera vez.** Mucha gente se baja un nonograma sin saber qué es;
+  cuatro líneas con un ejemplo dibujado es de lo más barato que se puede hacer por la retención
+  del primer día.
+
+---
+
+## Responsive
+
+Probado en emulador a 360 × 640 dp, en un móvil normal, en tablet (1067 dp) y en apaisado, y con
+la letra del sistema al 150 %.
+
+- **En apaisado el tablero se va a un lado y los controles al otro.** En una columna no caben los
+  dos y el panel se quedaría en un sello.
+- **El contenido tiene un ancho máximo** (560 dp) y se centra: en una tablet, una columna de
+  2.000 px no se lee. El tablero también tiene tope, porque a partir de cierto tamaño las casillas
+  dejan de ser cómodas y pasan a ser ridículas.
+- **Las pistas del tablero se dibujan en píxeles**, no en `sp`, así que la escala de letra del
+  sistema no descuadra la rejilla; los textos de la interfaz sí la respetan y se adaptan.
+- **Limitación conocida:** un 15 × 15 en un móvil de 360 dp deja casillas de unos 19 dp, por
+  debajo del objetivo táctil cómodo. Lo natural sería poder hacer zoom con dos dedos; está sin
+  hacer a propósito, porque el gesto convive mal con el arrastre para pintar y no se puede
+  verificar bien sin un dispositivo con multitáctil real.
+
+---
+
 ## Decisiones de juego
 
 - **Pintar está validado; tachar es libre.** Si pintas donde no toca, cuenta error y la casilla
@@ -130,6 +190,7 @@ estampa imágenes.
   juega el mismo y la app sigue funcionando sin conexión.
 - **El reloj se para** cuando la app pasa a segundo plano: ver un anuncio o atender una llamada no
   te arruina el récord.
+- **Las cruces no se penalizan nunca**: son apuntes tuyos.
 - **Al ganar, el cartel no tapa el dibujo.** Ocupa el sitio de los controles, porque el dibujo
   terminado es el premio.
 - **SharedPreferences** para el progreso. Son cuatro enteros; Room o DataStore aquí sobran.
@@ -235,9 +296,10 @@ sin instalaciones no hay negocio. Lo que de verdad mueve la aguja:
 
 ## Siguientes pasos naturales
 
-- Compartir el dibujo terminado como imagen (es el mejor marketing gratis de este género).
-- Puzzles con imagen real detrás (de un conjunto de dibujos a mano) además de los generados.
-- Guardar la partida a medias al salir.
+- Zoom con dos dedos para los 15 × 15 en pantallas pequeñas.
+- Más dibujos: el catálogo está hecho para crecer sin tocar código, solo añadiendo filas de
+  texto, y el test avisa si alguno obliga a adivinar.
+- Sonido (un «clac» cerámico al colocar) además de la vibración.
 - Logros y estadísticas por tamaño.
 
 ---

@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
@@ -24,8 +25,11 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.riscart.pixa.engine.Cell
 import com.riscart.pixa.engine.Puzzle
+import kotlin.math.PI
 import kotlin.math.floor
+import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * El panel de azulejos: las pistas arriba y a la izquierda, y la obra.
@@ -41,6 +45,10 @@ fun Tablero(
     colores: ColoresTablero,
     onCelda: (x: Int, y: Int, arrastrando: Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    /** 0 = pieza recién puesta, 1 = ya asentada. */
+    asentamiento: (Int) -> Float = { 1f },
+    /** La casilla que acabas de fallar, para marcarla un instante. */
+    fallo: Int? = null,
 ) {
     val medidor = rememberTextMeasurer()
     val densidad = LocalDensity.current
@@ -59,7 +67,12 @@ fun Tablero(
 
         val paso = minOf(anchoDisponible / unidadesAncho, altoDisponible / unidadesAlto)
         val ladoPista = paso * factorPista
-        val origenX = maxPistasFila * ladoPista
+
+        // Si sobra ancho (apaisado, tablet), el panel va centrado. Sin esto se
+        // quedaba pegado a la izquierda con un hueco enorme al lado.
+        val anchoUsado = unidadesAncho * paso
+        val sobra = ((anchoDisponible - anchoUsado) / 2f).coerceAtLeast(0f)
+        val origenX = sobra + maxPistasFila * ladoPista
         val origenY = maxPistasCol * ladoPista
 
         // La junta y el redondeo encogen con la pieza: en un 15 × 15 una junta
@@ -124,9 +137,12 @@ fun Tablero(
                     }
                 },
         ) {
-            dibujarBandaPistas(colores, origenX, origenY, paso, puzzle)
+            dibujarBandaPistas(colores, origenX, origenY, paso, maxPistasFila * ladoPista, puzzle)
             dibujarJunta(colores, origenX, origenY, paso, junta, radio, puzzle)
-            dibujarPiezas(puzzle, rejilla, piezas, origenX, origenY, paso)
+            dibujarPiezas(puzzle, rejilla, piezas, origenX, origenY, paso, asentamiento)
+            if (fallo != null) {
+                dibujarFallo(fallo, puzzle, colores, origenX, origenY, paso, radio)
+            }
             dibujarPistas(
                 puzzle, rejilla, medidor, estiloPista, estiloPistaHecha,
                 origenX, origenY, paso, ladoPista, maxPistasFila, maxPistasCol,
@@ -148,6 +164,7 @@ private fun DrawScope.dibujarBandaPistas(
     origenX: Float,
     origenY: Float,
     paso: Float,
+    anchoPistas: Float,
     puzzle: Puzzle,
 ) {
     drawRect(
@@ -155,10 +172,12 @@ private fun DrawScope.dibujarBandaPistas(
         topLeft = Offset(origenX, 0f),
         size = Size(puzzle.width * paso, origenY),
     )
+    // Arranca donde arrancan las pistas, no en el borde: con el tablero
+    // centrado, la banda se estiraba hasta el margen izquierdo de la pantalla.
     drawRect(
         color = colores.bandaPistas,
-        topLeft = Offset(0f, origenY),
-        size = Size(origenX, puzzle.height * paso),
+        topLeft = Offset(origenX - anchoPistas, origenY),
+        size = Size(anchoPistas, puzzle.height * paso),
     )
 }
 
@@ -210,24 +229,54 @@ private fun DrawScope.dibujarPiezas(
     origenX: Float,
     origenY: Float,
     paso: Float,
+    asentamiento: (Int) -> Float,
 ) {
     for (y in 0 until puzzle.height) {
         for (x in 0 until puzzle.width) {
-            val estampa = when (rejilla[y * puzzle.width + x]) {
+            val i = y * puzzle.width + x
+            val estampa = when (rejilla[i]) {
                 Cell.FILLED -> piezas.puesta
                 Cell.CROSSED -> piezas.tachada
                 Cell.UNKNOWN -> piezas.vacia
             }
             // Se redondea a píxel entero para que el vidriado salga nítido.
-            drawImage(
-                image = estampa,
-                topLeft = Offset(
-                    (origenX + x * paso).roundToInt().toFloat(),
-                    (origenY + y * paso).roundToInt().toFloat(),
-                ),
+            val esquina = Offset(
+                (origenX + x * paso).roundToInt().toFloat(),
+                (origenY + y * paso).roundToInt().toFloat(),
             )
+            val avance = asentamiento(i)
+            if (avance >= 1f) {
+                drawImage(image = estampa, topLeft = esquina)
+            } else {
+                // La pieza entra pequeña, se pasa un pelín y se asienta.
+                val suave = 1f - (1f - avance).pow(3)
+                val escala = 0.66f + 0.34f * suave + 0.07f * sin(PI.toFloat() * avance)
+                scale(escala, pivot = Offset(esquina.x + paso / 2f, esquina.y + paso / 2f)) {
+                    drawImage(image = estampa, topLeft = esquina)
+                }
+            }
         }
     }
+}
+
+/** El aviso de que ahí no iba pieza: un destello que se apaga solo. */
+private fun DrawScope.dibujarFallo(
+    indice: Int,
+    puzzle: Puzzle,
+    colores: ColoresTablero,
+    origenX: Float,
+    origenY: Float,
+    paso: Float,
+    radio: Float,
+) {
+    val x = indice % puzzle.width
+    val y = indice / puzzle.width
+    drawRoundRect(
+        color = colores.fallo,
+        topLeft = Offset(origenX + x * paso, origenY + y * paso),
+        size = Size(paso, paso),
+        cornerRadius = CornerRadius(radio, radio),
+    )
 }
 
 private fun DrawScope.dibujarPistas(

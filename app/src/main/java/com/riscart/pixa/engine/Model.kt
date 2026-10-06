@@ -14,6 +14,8 @@ data class Puzzle(
     val rowClues: List<List<Int>>,
     val colClues: List<List<Int>>,
     val solution: List<Boolean>,
+    /** Qué se ve al terminarlo, si es un dibujo del catálogo. */
+    val nombre: String? = null,
 ) {
     init {
         require(width > 0 && height > 0) { "La rejilla no puede estar vacía" }
